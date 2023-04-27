@@ -1503,7 +1503,7 @@ def plot_Kitaev_Resource(x_points='two',save=False):
 
 
 if (plot_data_new or plot_data_from_2021):
-    plot_Kitaev(x_points='single',save=False)
-    plot_Kitaev_infidelity(x_points='single',save=False)
-    plot_x_dependence(save=False)
-    plot_Kitaev_Resource(x_points='single',save=False)
+    plot_Kitaev(x_points='single',save=True)
+    # plot_Kitaev_infidelity(x_points='single',save=False)
+    # plot_x_dependence(save=False)
+    # plot_Kitaev_Resource(x_points='single',save=False)
