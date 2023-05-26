@@ -19,6 +19,7 @@ from matplotlib.colors import DivergingNorm
 import scipy.interpolate as interpolate
 from scipy.signal import convolve2d
 from simulators.Utils import map_decohere_to_worst_gate_fidelity
+from matplotlib import ticker
 
 print('all packages imported')
 
@@ -36,11 +37,11 @@ name = 'recreate_paper'
 T2_list = list(set([int(list(np.geomspace(10,10000,nT2, endpoint=True))[i]) for i in range(nT2)]))
 T2_list.sort()
 
-generate_data = True
+generate_data = False
 
-plot_data_new = True
+plot_data_new = False
 
-plot_data_from_2021 = False
+plot_data_from_2021 = True
 
 
 #########################################################################################
@@ -487,13 +488,19 @@ if plot_data_from_2021:
 ############################## plot 2 2d heatmap ########################################
 #########################################################################################
 
-def set_ticks_size(ax,x,y):
+def set_ticks_size(ax, x, y, sparse_x=False, sparse_y=False):
     # Set tick font size
-    for label in (ax.get_xticklabels()):
+    for ind, label in enumerate(ax.get_xticklabels()):
         label.set_fontsize(x)
+        if sparse_x:
+            if ind != 1 and ind != 8:
+                label.set_visible(False)
     # Set tick font size
-    for label in (ax.get_yticklabels()):
+    for ind, label in enumerate(ax.get_yticklabels()):
         label.set_fontsize(y)
+        if sparse_y:
+            if ind%2==0:
+                label.set_visible(False)
 
 def interpolate_2d_grid(X,Y,Z):
     x = []
@@ -520,15 +527,23 @@ def interpolate_2d_grid(X,Y,Z):
 
 def plot_color(X,Y,Z,xlabel,ylabel,title):
     fig,ax = plt.subplots()
+    plt.locator_params(axis='x', nbins=5)
+    plt.locator_params(axis='y', nbins=7)
     norm = DivergingNorm(vmin=Z.min(), vcenter=0, vmax=Z.max())
     lims = dict(cmap='RdBu')
     plt.pcolormesh(X, Y, Z, shading='flat', norm=norm, **lims)
-    ax.set_xlabel(xlabel,fontsize=15)
-    ax.set_ylabel(ylabel,fontsize=15)
-    ax.set_title(title,fontsize=14)
-    set_ticks_size(ax, 13, 12)
-    plt.colorbar(label="Physical Control             Logical Control")
+    ax.set_xlabel(xlabel,fontsize=20)
+    ax.set_ylabel(ylabel,fontsize=20)
+    ax.set_title(title,fontsize=20)
+    set_ticks_size(ax, 18, 15,sparse_y=False,sparse_x=False)
+    cb = plt.colorbar()
+    # cb.set_label(label="Physical        Logical",fontsize=20)
+    cb.ax.tick_params(labelsize=16)
+    tick_locator = ticker.MaxNLocator(nbins=7)
+    cb.locator = tick_locator
+    cb.update_ticks()
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
     # plt.show()
 
 def plot_CNOTExplore_heatmap(x_points='two',a=0,interpolate=True,save=False):
@@ -538,13 +553,13 @@ def plot_CNOTExplore_heatmap(x_points='two',a=0,interpolate=True,save=False):
         ylabel = 'Worst-Case Entangling Gate Fidelity'
     elif x_points == 'single':
         fid = f_worst_1q_CNOTs
-        ylabel = 'Worst-Case Single Gate Fidelity'
+        ylabel = 'Single Gate Fidelity'
     if plot_data_from_2021:
         if perfect_syndrome_extraction:
             end_cnot = 50
         else:
             end_cnot = 46
-        start_ind = end_cnot - 27
+        start_ind = end_cnot - 29
     else:
         start_ind = 0
         end_cnot = len(fid)
@@ -553,6 +568,7 @@ def plot_CNOTExplore_heatmap(x_points='two',a=0,interpolate=True,save=False):
     Z = l[a][start_ind:end_cnot,:]-t[a][start_ind:end_cnot,:]
     Xnew,Ynew,Znew = interpolate_2d_grid(X,Y,Z)
     title = "Fidelity: Logical Control minus Physical Control"
+    title = "                                                    $\Delta F$"
     xlabel = "Circuit Depth"
     if interpolate:
         plot_color(Xnew, Ynew, Znew, xlabel,ylabel,title)
@@ -563,5 +579,5 @@ def plot_CNOTExplore_heatmap(x_points='two',a=0,interpolate=True,save=False):
     plt.show()
 
 if (plot_data_new or plot_data_from_2021):
-    plot_CNOTExplore_heatmap(x_points='single',a=0,interpolate=True,save=False)
-    plot_CNOTExplore_heatmap(x_points='single',a=0,interpolate=False)
+    plot_CNOTExplore_heatmap(x_points='single',a=0,interpolate=True,save=True)
+    # plot_CNOTExplore_heatmap(x_points='single',a=0,interpolate=False)

@@ -1253,6 +1253,8 @@ def plot_Kitaev(x_points='two',window=10,save=False):
     end = 120
 
     if plot_data_from_2021:
+        plt.locator_params(axis='x', nbins=3)
+        plt.locator_params(axis='y', nbins=7)
         if x_points == 'single':
             start = 10
             fig, ax = plt.subplots()
@@ -1265,16 +1267,16 @@ def plot_Kitaev(x_points='two',window=10,save=False):
             x=f_worst_1q[start:end]
             ax.plot(x, np.array(f_lLPS[start:end]), label='logical ancilla SPS+LPS', color='blue')
             ax.plot(x, np.array(f_tSPS[start:end]), label='physical ancilla SPS', color='red')
-            ax.set_xlabel('Worst-Case Single Gate Fidelity', fontsize=15)
-            ax.set_ylabel('Whole Circuit Fidelity', fontsize=18)
+            ax.set_xlabel('Single Gate Fidelity', fontsize=20)
+            ax.set_ylabel('Whole Circuit Fidelity', fontsize=20)
             # ax.plot(x, np.array(f_lEC[start:end]), label='logical 1EC')
-            ax.legend(fontsize=size)
-            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            ax.legend(fontsize=13)
+            plt.tight_layout(rect=[0.05, 0.03, 0.95, 0.95])
             for label in (ax.get_xticklabels()):
-                label.set_fontsize(13)
+                label.set_fontsize(20)
             # Set tick font size
             for label in (ax.get_yticklabels()):
-                label.set_fontsize(13)
+                label.set_fontsize(20)
 
         elif x_points == 'two':
             start = 14
@@ -1456,6 +1458,9 @@ def plot_Kitaev_Resource(x_points='two',save=False):
     if x_points == 'two':
         x = f_worst_2q
         plt.xlabel('Worst-Case Entangling Gate Fidelity', fontsize=18)
+    elif x_points == 'single':
+        x = f_worst_1q
+        plt.xlabel('Worst-Case Single Gate Fidelity', fontsize=18)
     else:
         x = T2_list
         plt.xlabel('$T_{2}$  $[T_{gate}]$', fontsize=18)
@@ -1497,8 +1502,10 @@ def plot_Kitaev_Resource(x_points='two',save=False):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
     if save:
-        plt.savefig('images\\KitaevNonAccelerated.png')
-
+        if K:
+            plt.savefig('images\\KitaevNonAcceleratedKisS.png')
+        else:
+            plt.savefig('images\\KitaevNonAcceleratedKisI.png')
     plt.show()
 
 
@@ -1506,4 +1513,4 @@ if (plot_data_new or plot_data_from_2021):
     plot_Kitaev(x_points='single',save=True)
     # plot_Kitaev_infidelity(x_points='single',save=False)
     # plot_x_dependence(save=False)
-    # plot_Kitaev_Resource(x_points='single',save=False)
+    # plot_Kitaev_Resource(x_points='single',save=True)

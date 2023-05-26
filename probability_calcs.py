@@ -29,6 +29,10 @@ import operator as op
 from functools import reduce
 import heapq
 from scipy.interpolate import interp1d
+from scipy.signal import convolve2d
+from matplotlib.colors import DivergingNorm
+import scipy.interpolate as interpolate
+import matplotlib.colors as colors
 
 print('all packages imported')
 
@@ -38,8 +42,8 @@ print('all packages imported')
 #########################################################################################
 
 # plot related variables
-rotation_type = 'Rx'
-noise_type = 'T2'
+rotation_type = 'Rz'
+noise_type = 'T1'
 perfect_syndrome_extraction = False
 name = 'recalc_paper'
 
@@ -691,35 +695,13 @@ def getSTD(d,li):
         theta = bin2num(key)/2**len(key)
         p = d[key]
         sum_x += p*np.cos(theta)
-        sum_y += p*np.sin(theta)
+        sum_y -= p*np.sin(theta)
+    theta_avg = np.arctan(sum_y/sum_x)
     R = np.sqrt(sum_x ** 2 + sum_y ** 2)
     std = np.sqrt(-2*np.log(R))
     return std/np.sqrt(1-li), std
 
-def getMEAN_circular_correct(d):
-    sum_x = 0
-    sum_y = 0
-    for key in d.keys():
-        theta = 2*np.pi*bin2num(key)/2**len(key)
-        p = d[key]
-        sum_x += p*np.cos(theta)
-        sum_y += p*np.sin(theta)
-    if sum_y > 0:
-        if sum_x > 0:
-            theta_avg = np.arctan(np.abs(sum_y)/np.abs(sum_x))/np.pi
-    if sum_y > 0:
-        if sum_x < 0:
-            theta_avg = 0.5+np.arctan(np.abs(sum_y)/np.abs(sum_x))/np.pi
-    if sum_y < 0:
-        if sum_x < 0:
-            theta_avg = 1+np.arctan(np.abs(sum_y)/np.abs(sum_x))/np.pi
-    if sum_y < 0:
-        if sum_x > 0:
-            theta_avg = 1.5+np.arctan(np.abs(sum_y)/np.abs(sum_x))/np.pi
-
-    return theta_avg/2
-
-def getMEAN(d):
+def getMEAN_circular(d):
     sum_x = 0
     sum_y = 0
     for key in d.keys():
@@ -730,18 +712,7 @@ def getMEAN(d):
     theta_avg = np.arctan(sum_y/sum_x)
     return theta_avg/np.pi
 
-def getSTD_regular(d,li):
-    results = []
-    # create a list of all experiment results, with repetitions
-    for key in d.keys():
-        angle = fracbin2num(key)
-        for i in range(int(d[key]*1e4)):
-            results.append(angle)
-    # get the STD
-    std = np.std(results)
-    return std/np.sqrt(1-li), std
-
-def getMEAN_regular(d):
+def getMEAN(d):
     results = []
     # create a list of all experiment results, with repetitions
     for key in d.keys():
@@ -751,6 +722,28 @@ def getMEAN_regular(d):
     # get the MEAN
     mean = np.mean(results)
     return mean
+
+def getMEAN_circular_iterative(loaded_distribution,epsilon = 1 / 10000,numeric=True):
+    curr_avg = 1 / 2
+    prev_avg = 0
+    num_iterations = 0
+    while np.abs(prev_avg - curr_avg) > epsilon:
+        num_iterations += 1
+        prev_avg = curr_avg
+        curr_avg = 0
+        for key in loaded_distribution.keys():
+            if not numeric:
+                theta = bin2num(key)/2**len(key)
+            else:
+                theta = key
+            if np.abs(theta - prev_avg) < 0.5:
+                curr_avg += loaded_distribution[key] * theta
+            else:
+                if theta < prev_avg:
+                    curr_avg += loaded_distribution[key] * (theta + 1)
+                else:
+                    curr_avg += loaded_distribution[key] * (theta - 1)
+    return curr_avg
 
 def num2bin(angle, percision):
     """
@@ -1104,8 +1097,8 @@ def plot_histogram_STD_VS_num_digits(angle,max_precision,U,decay,folder_to_save,
 
 if generate_data:
     # createAllData(angle, precision, U=rotation_type, decay=noise_type, T_list=T_list)
-    Ns = [1,5,10,20,30,40,50,60,70,80,90,100,120,150,200,300,500,1000,1500,2000,4000,10000,20000,50000,100000,500000,1000000]
-    for N in Ns[:1]:
+    Ns = [1,3,5,7,9,11,15,21,29,39,51,65,79,99]
+    for N in Ns:
         save_all_precisions(angle, precision, U=rotation_type, decay=noise_type, T_list=T_list, N=N)
 
 
@@ -1119,27 +1112,32 @@ if show_small_histograms:
     create_data_func = create_data_chooser(rotation_type, noise_type)
 
 
-    def set_ticks_size(ax, x, y):
+    def set_ticks_size(ax, x, y, sparse_x=False,sparse_y=False):
         # Set tick font size
-        for label in (ax.get_xticklabels()):
+        for ind,label in enumerate(ax.get_xticklabels()):
             label.set_fontsize(x)
+            if sparse_x:
+                if ind%2==0:
+                    label.set_visible(False)
         # Set tick font size
-        for label in (ax.get_yticklabels()):
+        for ind,label in enumerate(ax.get_yticklabels()):
             label.set_fontsize(y)
+            if sparse_y:
+                if ind % 2 == 0:
+                    label.set_visible(False)
+
 
 
     def create_data(precision, type, T, angle):
-        print('starting to create data for logical algorithm')
+        print('starting to create data for algorithm')
         start = time.time()
         create_data_func(T, angle, precision, type)
         print('ended in ' + str(time.time() - start) + ' seconds')
+    # create_data(4,'traditional',1,1/3)
+    # create_data(4,'traditional',5,1/3)
+    # create_data(4,'ideal',1,1/3)
 
-
-    # create_data(4,'logical',40,1/np.sqrt(3))
-    # create_data(4,'traditional',40,1/np.sqrt(3))
-    # create_data(4,'ideal',40,1/np.sqrt(3))
-
-    def plot_histogram_wrapped(N,precision, T, angle, circular=True):
+    def plot_histogram_wrapped(N,precision, T, angle):
         print('starting to create histogram for logical algorithm')
         d_l, li = createHistogram_N(N,T, angle, precision, 'logical', U=rotation_type, decay=noise_type)
         d_t, li = createHistogram_N(N,T, angle, precision, 'traditional', U=rotation_type, decay=noise_type)
@@ -1153,59 +1151,45 @@ if show_small_histograms:
         vals_i = [d_i[k] for k in keys_i]
         keys_i = [bin2num(k) / 2 ** len(k) for k in d_i.keys()]
         print('lost information is: ' + str(li))
-        df_periodic = pandas.DataFrame({
+        df = pandas.DataFrame({
             'Factor': keys_i,
-            '\n physical ancilla, \n $T_2=\infty$ \n $\\bar{\\theta}=$' + str(round(getMEAN(d_i), 3)) +
-            ',\n $\sigma=$' + str(round(getSTD(d_i, 0)[0], 2)): vals_i,
-            '\n logical ancilla, \n $T_2=40 T_{gate}$ \n $\\bar{\\theta}=$' + str(round(getMEAN(d_l), 3)) +
+            'Ideal \n $\\bar{\\theta}=$' + str(round(getMEAN(d_i), 3)) +
+            '\n $\sigma=$' + str(round(getSTD(d_i, 0)[0], 2)): vals_i,
+            'Logical \n $\\bar{\\theta}=$' + str(round(getMEAN(d_l), 3)) +
             ',\n $\sigma=$' + str(round(getSTD(d_l, 0)[0], 3)): vals_l,
-            '\n physical ancilla, \n $T_2=40 T_{gate}$ \n $\\bar{\\theta}=$' + str(round(getMEAN(d_t), 3)) +
-            ',\n $\sigma=$' + str(round(getSTD(d_t, 0)[0], 3)): vals_t,
+            'Physical \n $\\bar{\\theta}=$' + str(round(getMEAN(d_t), 3)) +
+            '\n $\sigma=$' + str(round(getSTD(d_t, 0)[0], 3)): vals_t,
         })
         # get values in the same order as keys, and parse percentage values
-
-        df_regular = pandas.DataFrame({
-            'Factor': keys_i,
-            '\n physical ancilla, \n $T_2=\infty$ \n $\\bar{\\theta}=$' + str(round(getMEAN_regular(d_i), 3)) +
-            ',\n $\sigma=$' + str(round(getSTD_regular(d_i, 0)[0], 2)): vals_i,
-            '\n logical ancilla, \n $T_2=40 T_{gate}$ \n $\\bar{\\theta}=$' + str(round(getMEAN_regular(d_l), 3)) +
-            ',\n $\sigma=$' + str(round(getSTD_regular(d_l, 0)[0], 3)): vals_l,
-            '\n physical ancilla, \n $T_2=40 T_{gate}$ \n $\\bar{\\theta}=$' + str(round(getMEAN_regular(d_t), 3)) +
-            ',\n $\sigma=$' + str(round(getSTD_regular(d_t, 0)[0], 3)): vals_t,
-        })
-
-        if circular:
-            df = df_periodic
-        else:
-            df = df_regular
 
         fig, ax1 = plt.subplots(figsize=(20, 10))
         tidy = df.melt(id_vars='Factor').rename(columns=str.title)
         sns.barplot(x='Factor', y='Value', hue='Variable', data=tidy, ax=ax1)
-        ax1.set_xlabel('Experiment Result', fontsize=30)
-        ax1.set_ylabel('Probability', fontsize=30)
-        plt.legend(fontsize=25, loc='upper left')
+        ax1.set_xlabel('Experiment Result', fontsize=40)
+        ax1.set_ylabel('Probability', fontsize=40)
+        plt.legend(fontsize=40, loc='upper left')
         sns.despine(fig)
-        ax1.set_title('$\\theta=1/3$                                                       ', fontsize=25)
-        plt.tight_layout(rect=[0.02, 0.03, 1, 0.95])
-        set_ticks_size(ax1, 22, 25)
+        ax1.set_title('$T_2=40 T_{gate}$,   $\\theta=1/3$                                         ', fontsize=40)
+        plt.tight_layout(rect=[0.05, 0.03, 1.1, 0.95])
+        set_ticks_size(ax1, 35, 35,sparse_x=True)
         plt.savefig('images\\latest_histogram_'+str(N)+'.jpg')
         plt.show()
 
-    def plot_histogram_wrapped_alg(precision, T, angle):
+    def plot_histogram_wrapped_ideal(precision, T, angle):
         print('starting to create histogram for logical algorithm')
         d_1, li = createHistogram_N(1,T, angle, precision, 'ideal', U=rotation_type, decay=noise_type)
         d_3, li = createHistogram_N(3,T, angle, precision, 'ideal', U=rotation_type, decay=noise_type)
         d_5, li = createHistogram_N(5,T, angle, precision, 'ideal', U=rotation_type, decay=noise_type)
 
-        keys_1 = list(d_1.keys())
+        keys_1 = np.array(list(d_1.keys()))
         vals_1 = [d_1[k] for k in keys_1]
-        keys_3 = list(d_3.keys())
+        keys_3 = np.array(list(d_3.keys()))
         vals_3 = [d_3[k] for k in keys_3]
-        keys_5 = list(d_5.keys())
+        keys_5 = np.array(list(d_5.keys()))
         vals_5 = [d_5[k] for k in keys_5]
-        keys_1 = [bin2num(k) / 2 ** len(k) for k in d_1.keys()]
+        keys_1 = np.array([bin2num(k) / 2 ** len(k) for k in d_1.keys()])
         print('lost information is: ' + str(li))
+        # keys_1[::2] = 0
         df = pandas.DataFrame({
             'Factor': keys_1,
             '\n $n=5$,\n $P_{error}=$'+str(round(1-np.sum(heapq.nlargest(2, d_5.values())),3)): vals_5,
@@ -1217,28 +1201,176 @@ if show_small_histograms:
         fig, ax1 = plt.subplots(figsize=(20, 10))
         tidy = df.melt(id_vars='Factor').rename(columns=str.title)
         sns.barplot(x='Factor', y='Value', hue='Variable', data=tidy, ax=ax1)
+        ax1.set_xlabel('Experiment Result', fontsize=40)
+        ax1.set_ylabel('Probability', fontsize=40)
+        plt.legend(fontsize=35, loc='upper left')
+        sns.despine(fig)
+        ax1.set_title('ideal results, $\\theta=1/3$                                            ', fontsize=40)
+        plt.tight_layout(rect=[0.05, 0.03, 1.1, 0.95])
+        set_ticks_size(ax1, 35, 35,sparse_x=True)
+        plt.savefig('images\\compare_ideal.jpg')
+        plt.show()
+
+    def plot_histogram_wrapped_noise(N,precision,angle):
+        print('starting to create histogram for logical algorithm')
+        d_t, li = createHistogram_N(N,1, angle, precision, 'traditional', U=rotation_type, decay=noise_type)
+        d_l, li = createHistogram_N(N,5, angle, precision, 'traditional', U=rotation_type, decay=noise_type)
+        d_i, li = createHistogram_N(N,1, angle, precision, 'ideal', U=rotation_type, decay=noise_type)
+
+        keys_l = list(d_l.keys())
+        vals_l = [d_l[k] for k in keys_l]
+        keys_t = list(d_t.keys())
+        vals_t = [d_t[k] for k in keys_t]
+        keys_i = list(d_i.keys())
+        vals_i = [d_i[k] for k in keys_i]
+        keys_i = [bin2num(k) / 2 ** len(k) for k in d_i.keys()]
+        print('lost information is: ' + str(li))
+        df = pandas.DataFrame({
+            'Factor': keys_i,
+            '\n $T_2=\infty$ \n $\\bar{\\theta}=$' + str(round(getMEAN(d_i), 3)) +
+            ',\n $\sigma=$' + str(round(getSTD(d_i, 0)[0], 2)): vals_i,
+            '\n $T_2=30 T_{gate}$ \n $\\bar{\\theta}=$' + str(round(getMEAN(d_l), 3)) +
+            ',\n $\sigma=$' + str(round(getSTD(d_l, 0)[0], 3)): vals_l,
+            '\n $T_2=10 T_{gate}$ \n $\\bar{\\theta}=$' + str(round(getMEAN(d_t), 3)) +
+            ',\n $\sigma=$' + str(round(getSTD(d_t, 0)[0], 3)): vals_t,
+        })
+        # get values in the same order as keys, and parse percentage values
+
+        fig, ax1 = plt.subplots(figsize=(20, 10))
+        tidy = df.melt(id_vars='Factor').rename(columns=str.title)
+        sns.barplot(x='Factor', y='Value', hue='Variable', data=tidy, ax=ax1)
         ax1.set_xlabel('Experiment Result', fontsize=30)
         ax1.set_ylabel('Probability', fontsize=30)
         plt.legend(fontsize=25, loc='upper left')
         sns.despine(fig)
-        ax1.set_title('ideal results, $\\theta=1/3$                                                  ', fontsize=25)
+        ax1.set_title('$\\theta=1/3$                                                       ', fontsize=25)
         plt.tight_layout(rect=[0.02, 0.03, 1, 0.95])
         set_ticks_size(ax1, 22, 25)
-        plt.savefig('images\\compare_ideal.jpg')
+        plt.savefig('images\\histogram_noise_low_'+str(N)+'.jpg')
         plt.show()
 
+    def plot_series_ideal_precisions(max_precision,angle,create = False):
+        if create:
+            create_data(max_precision, 'ideal', 1, 1 / 3)
 
-    plot_histogram_wrapped(1,4, 40, 1 / 3,circular=False)
+        def plotter(precision):
+            d_i, li = createHistogram_N(1,1, angle, precision, 'ideal', U=rotation_type, decay=noise_type)
+
+            keys_i = list(d_i.keys())
+            vals_i = [d_i[k] for k in keys_i]
+            keys_i = [bin2num(k) / 2 ** len(k) for k in d_i.keys()]
+            print('lost information is: ' + str(li))
+            df = pandas.DataFrame({
+                'Factor': keys_i,
+                '\n $T_2=\infty$ \n $\\bar{\\theta}=$' + str(round(getMEAN_circular_iterative(d_i,numeric=False), 3)) +
+                ',\n $\sigma=$' + str(round(getSTD(d_i, 0)[0], 2)): vals_i,
+            })
+            # get values in the same order as keys, and parse percentage values
+
+            fig, ax1 = plt.subplots(figsize=(20, 10))
+            tidy = df.melt(id_vars='Factor').rename(columns=str.title)
+            sns.barplot(x='Factor', y='Value', hue='Variable', data=tidy, ax=ax1)
+            ax1.set_xlabel('Experiment Result', fontsize=30)
+            ax1.set_ylabel('Probability', fontsize=30)
+            plt.legend(fontsize=25, loc='upper left')
+            sns.despine(fig)
+            ax1.set_title('$\\theta=1/3$                                                       ', fontsize=25)
+            plt.tight_layout(rect=[0.02, 0.03, 1, 0.95])
+            set_ticks_size(ax1, 22, 25)
+            if precision > 4:
+                ax1.axes.xaxis.set_ticklabels([])
+            plt.savefig('images\\histogram_ideal_'+str(precision)+'.jpg')
+            plt.show()
+
+        for precision in range(1,max_precision+1):
+            plotter(precision)
+
+
+    # plot_series_ideal_precisions(13, 1/3, create=False)
+    plot_histogram_wrapped(1,4, 40, 1 / 3)
     # plot_histogram_wrapped(3,4, 40, 1 / 3)
     # plot_histogram_wrapped(5,4, 40, 1 / 3)
-    plot_histogram_wrapped_alg(4, 40, 1 / 3)
+    plot_histogram_wrapped_ideal(4, 40, 1 / 3)
+    # plot_histogram_wrapped_noise(1, 4, 1 / 3)
+
+def savitzky_golay(y, window_size, order, deriv=0, rate=1):
+    r"""Smooth (and optionally differentiate) data with a Savitzky-Golay filter.
+    The Savitzky-Golay filter removes high frequency noise from data.
+    It has the advantage of preserving the original shape and
+    features of the signal better than other types of filtering
+    approaches, such as moving averages techniques.
+    Parameters
+    ----------
+    y : array_like, shape (N,)
+        the values of the time history of the signal.
+    window_size : int
+        the length of the window. Must be an odd integer number.
+    order : int
+        the order of the polynomial used in the filtering.
+        Must be less then `window_size` - 1.
+    deriv: int
+        the order of the derivative to compute (default = 0 means only smoothing)
+    Returns
+    -------
+    ys : ndarray, shape (N)
+        the smoothed signal (or it's n-th derivative).
+    Notes
+    -----
+    The Savitzky-Golay is a type of low-pass filter, particularly
+    suited for smoothing noisy data. The main idea behind this
+    approach is to make for each point a least-square fit with a
+    polynomial of high order over a odd-sized window centered at
+    the point.
+    Examples
+    --------
+    t = np.linspace(-4, 4, 500)
+    y = np.exp( -t**2 ) + np.random.normal(0, 0.05, t.shape)
+    ysg = savitzky_golay(y, window_size=31, order=4)
+    import matplotlib.pyplot as plt
+    plt.plot(t, y, label='Noisy signal')
+    plt.plot(t, np.exp(-t**2), 'k', lw=1.5, label='Original signal')
+    plt.plot(t, ysg, 'r', label='Filtered signal')
+    plt.legend()
+    plt.show()
+    References
+    ----------
+    .. [1] A. Savitzky, M. J. E. Golay, Smoothing and Differentiation of
+       Data by Simplified Least Squares Procedures. Analytical
+       Chemistry, 1964, 36 (8), pp 1627-1639.
+    .. [2] Numerical Recipes 3rd Edition: The Art of Scientific Computing
+       W.H. Press, S.A. Teukolsky, W.T. Vetterling, B.P. Flannery
+       Cambridge University Press ISBN-13: 9780521880688
+    """
+    import numpy as np
+    from math import factorial
+
+    try:
+        window_size = np.abs(np.int(window_size))
+        order = np.abs(np.int(order))
+    except ValueError as msg:
+        raise ValueError("window_size and order have to be of type int")
+    if window_size % 2 != 1 or window_size < 1:
+        raise TypeError("window_size size must be a positive odd number")
+    if window_size < order + 2:
+        raise TypeError("window_size is too small for the polynomials order")
+    order_range = range(order + 1)
+    half_window = (window_size - 1) // 2
+    # precompute coefficients
+    b = np.mat([[k ** i for i in order_range] for k in range(-half_window, half_window + 1)])
+    m = np.linalg.pinv(b).A[deriv] * rate ** deriv * factorial(deriv)
+    # pad the signal at the extremes with
+    # values taken from the signal itself
+    firstvals = y[0] - np.abs(y[1:half_window + 1][::-1] - y[0])
+    lastvals = y[-1] + np.abs(y[-half_window - 1:-1][::-1] - y[-1])
+    y = np.concatenate((firstvals, y, lastvals))
+    return np.convolve(m[::-1], y, mode='valid')
 
 
 #########################################################################################
 ########### load data from folder for data generated now  ###############################
 #########################################################################################
 
-def load_IPEA_new(rotation_type,noise_type,N=None):
+def load_IPEA_new(rotation_type,noise_type,N=1):
     path = os.getcwd()
     if perfect_syndrome_extraction:
         if N is None:
@@ -1255,9 +1387,12 @@ def load_IPEA_new(rotation_type,noise_type,N=None):
                                   'data\\IPEA\\NoisySyndromeExtraction\\' + name + '\\' + rotation_type + '\\' + noise_type + '\\' + str(
                                       angle)+'\\'+str(N))
 
-    logical_STDs = np.load(os.path.join(folder, 'logical_STDs.npy'))
-    logical_STDs_noLI = np.load(os.path.join(folder, 'logical_STDs_noLI.npy'))
-    traditional_STDs = np.load(os.path.join(folder, 'traditional_STDs.npy'))
+    # logical_STDs = np.load(os.path.join(folder, 'logical_STDs.npy'))
+    logical_STDs = None
+    # logical_STDs_noLI = np.load(os.path.join(folder, 'logical_STDs_noLI.npy'))
+    logical_STDs_noLI = None
+    # traditional_STDs = np.load(os.path.join(folder, 'traditional_STDs.npy'))
+    traditional_STDs = None
     traditional_STDs_noLI = np.load(os.path.join(folder, 'traditional_STDs_noLI.npy'))
     ideal_STDs = np.load(os.path.join(folder, 'ideal_STDs.npy'))
     ideal_STDs_noLI = np.load(os.path.join(folder, 'ideal_STDs_noLI.npy'))
@@ -1267,22 +1402,31 @@ def load_IPEA_new(rotation_type,noise_type,N=None):
     f_worst_1q_IPEA = np.load(os.path.join(folder, 'f_worst_1q.npy'))
     f_worst_2q_IPEA = np.load(os.path.join(folder, 'f_worst_2q.npy'))
     T_list_for_IPEA = np.load(os.path.join(folder, 'T_list.npy'))
+    # P_i = np.load(os.path.join(folder, 'P_i.npy'))
+    P_i = None
+    # P_l = np.load(os.path.join(folder, 'P_l.npy'))
+    P_l = None
+    # P_t = np.load(os.path.join(folder, 'P_t.npy'))
+    P_t = None
 
     return ideal_STDs, traditional_STDs, logical_STDs, ideal_STDs_noLI, traditional_STDs_noLI,\
            logical_STDs_noLI, f_worst_1q_IPEA, f_worst_2q_IPEA, T_list_for_IPEA,\
-           logical_MEANs,traditional_MEANs,ideal_MEANs
+           logical_MEANs,traditional_MEANs,ideal_MEANs,P_i,P_l,P_t
 
 if plot_data_new:
-    ideal_STDs, traditional_STDs, logical_STDs, ideal_STDs_noLI, traditional_STDs_noLI, logical_STDs_noLI, f_worst_1q_IPEA, f_worst_2q_IPEA, T_list_for_IPEA,logical_MEANs,traditional_MEANs,ideal_MEANs = load_IPEA_new(
+
+    ideal_STDs, traditional_STDs, logical_STDs, ideal_STDs_noLI, traditional_STDs_noLI, logical_STDs_noLI,\
+    f_worst_1q_IPEA, f_worst_2q_IPEA, T_list_for_IPEA,logical_MEANs,traditional_MEANs,ideal_MEANs,P_i,P_l,P_t = load_IPEA_new(
         rotation_type, noise_type,N=None)
+
 
 #########################################################################################
 ########### load data from folder for data generated in 2021  ###########################
 #########################################################################################
 
-def load_IPEA(rotation_type,noise_type):
-
-    file = os.path.join('data_2021\\IPEA_Fisher', 'IPEASTDs' + noise_type + '_' + rotation_type + '_all')
+def load_IPEA(rotation_type,noise_type,file=None):
+    if file is None:
+        file = os.path.join('data_2021\\IPEA_Fisher', 'IPEASTDs' + noise_type + '_' + rotation_type + '_all')
 
     path = os.getcwd()
     if perfect_syndrome_extraction:
@@ -1290,9 +1434,12 @@ def load_IPEA(rotation_type,noise_type):
     else:
         folder = os.path.join(path, 'data_2021\\IPEA_Fisher\\' + rotation_type+'\\'+noise_type+'\\' + str(angle))
 
-    logical_MEANs = np.load(os.path.join(folder, 'logical_MEANs.npy'))
-    traditional_MEANs = np.load(os.path.join(folder, 'traditional_MEANs.npy'))
-    ideal_MEANs = np.load(os.path.join(folder, 'ideal_MEANs.npy'))
+    # logical_MEANs = np.load(os.path.join(folder, 'logical_MEANs.npy'))
+    logical_MEANs = None
+    # traditional_MEANs = np.load(os.path.join(folder, 'traditional_MEANs.npy'))
+    traditional_MEANs = None
+    # ideal_MEANs = np.load(os.path.join(folder, 'ideal_MEANs.npy'))
+    ideal_MEANs = None
 
     mat = loadmat(file)
     logical_STDs = mat['logical_STDs']
@@ -1320,9 +1467,12 @@ def load_IPEA_old_python(rotation_type,noise_type):
     traditional_STDs_noLI = np.load(os.path.join(folder, 'traditional_STDs_noLI.npy'))
     ideal_STDs = np.load(os.path.join(folder, 'ideal_STDs.npy'))
     ideal_STDs_noLI = np.load(os.path.join(folder, 'ideal_STDs_noLI.npy'))
-    logical_MEANs = np.load(os.path.join(folder, 'logical_MEANs.npy'))
-    traditional_MEANs = np.load(os.path.join(folder, 'traditional_MEANs.npy'))
-    ideal_MEANs = np.load(os.path.join(folder, 'ideal_MEANs.npy'))
+    # logical_MEANs = np.load(os.path.join(folder, 'logical_MEANs.npy'))
+    logical_MEANs = None
+    # traditional_MEANs = np.load(os.path.join(folder, 'traditional_MEANs.npy'))
+    traditional_MEANs = None
+    # ideal_MEANs = np.load(os.path.join(folder, 'ideal_MEANs.npy'))
+    ideal_MEANs = None
     f_worst_1q_IPEA = np.load(os.path.join(folder, 'f_worst_1q.npy'))
     f_worst_2q_IPEA = np.load(os.path.join(folder, 'f_worst_2q.npy'))
     T_list_for_IPEA = np.load(os.path.join(folder, 'T_list.npy'))
@@ -1342,10 +1492,12 @@ def load_WCGF():
 
 if plot_data_from_2021:
 
-    ideal_STDs, traditional_STDs, logical_STDs, ideal_STDs_noLI, traditional_STDs_noLI, logical_STDs_noLI, f_worst_1q_IPEA, f_worst_2q_IPEA, T_list_for_IPEA,logical_MEANs,traditional_MEANs,ideal_MEANs = load_IPEA_old_python(
-        rotation_type, noise_type)
+    file = 'data_2021\\IPEA_Fisher\\IPEASTDsT2_Rx.mat'
 
-    # f_worst_1q,f_worst_2q,f_worst_1q_T1,f_worst_2q_T1,_,_ = load_WCGF()
+    ideal_STDs, traditional_STDs, logical_STDs, ideal_STDs_noLI, traditional_STDs_noLI, logical_STDs_noLI, f_worst_1q_IPEA, f_worst_2q_IPEA, T_list_for_IPEA,logical_MEANs,traditional_MEANs,ideal_MEANs = load_IPEA(
+        rotation_type, noise_type,file=None)
+
+    # f_worst_1q_IPEA,f_worst_2q,f_worst_1q_T1,f_worst_2q_T1,_,_ = load_WCGF()
 
 #########################################################################################
 ############################## plot #####################################################
@@ -1479,7 +1631,7 @@ def plot_IPEA_single_fig(precisions, withLI=False, x_points='single', save=True,
     else:
         fig, axes = plt.subplots()
 
-    axes.locator_params(axis='x', nbins=3)
+    axes.locator_params(axis='x', nbins=6)
     axes.locator_params(axis='y', nbins=5)
 
     if withLI:
@@ -1495,7 +1647,7 @@ def plot_IPEA_single_fig(precisions, withLI=False, x_points='single', save=True,
 
     if x_points == 'single':
         x = f_worst_1q_IPEA
-        axes.set_xlabel('Single Gate Fidelity', fontsize=35)
+        axes.set_xlabel('Single Gate Fidelity', fontsize=25)
     elif x_points == 'two':
         x = f_worst_2q_IPEA
         axes.set_xlabel('Worst-Case Entangling Gate Fidelity', fontsize=15)
@@ -1507,8 +1659,10 @@ def plot_IPEA_single_fig(precisions, withLI=False, x_points='single', save=True,
     print(x.shape)
 
     for i in range(len(precisions)):
+
         precision = precisions[i]
         c = color(precision)
+        axes.plot(np.NaN, np.NaN, label='m=' + str(precision), color=color(precision))
 
         j = precisions[i] - 1
         trad_data = traditional[j, :]
@@ -1518,65 +1672,57 @@ def plot_IPEA_single_fig(precisions, withLI=False, x_points='single', save=True,
         # lost info
         li = 1 - (logical_STDs_noLI[j, :] / logical_STDs[j, :]) ** 2
 
-        if withLI:
-            # fill between
-            logic = np.abs(logical_data - ideal_data)
-            interp_l = interp1d(x, logic)
-            trad = np.abs(trad_data - ideal_data)
-            interp_t = interp1d(x, trad)
-            new_x = np.linspace(0.997, 0.99999, 10000)
-            new_logic = interp_l(new_x)
-            new_trad = interp_t(new_x)
-            interp_li = interp1d(x, li)
-            new_li = interp_li(new_x)
+        if True:
+            if withLI:
+                # fill between
+                logic = np.abs(logical_data - ideal_data)
+                interp_l = interp1d(x, logic)
+                trad = np.abs(trad_data - ideal_data)
+                interp_t = interp1d(x, trad)
+                new_x = np.linspace(0.997, 0.99999, 10000)
+                new_logic = interp_l(new_x)
+                new_trad = interp_t(new_x)
+                interp_li = interp1d(x, li)
+                new_li = interp_li(new_x)
 
-            intersect_index = np.argmin(np.abs(new_logic - new_trad))
-            lbl = '$m=$' + str(precision)
+                intersect_index = np.argmin(np.abs(new_logic - new_trad))
+                lbl = '$m=$' + str(precision)
 
-            # axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c,label='$l_i=$' + str(
-            #     round(np.real(new_li[intersect_index]) * 100, 2)) + '%')
-            axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c, s=200)
-            # axes.plot(np.NaN, np.NaN, label=lbl, color=c)
+                # axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c,label='$l_i=$' + str(
+                #     round(np.real(new_li[intersect_index]) * 100, 2)) + '%')
+                axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c, s=200)
+                # axes.plot(np.NaN, np.NaN, label=lbl, color=c)
+            else:
+                # fill between
+                logic = np.abs(logical_data - ideal_data)
+                interp_l = interp1d(x, logic)
+                trad = np.abs(trad_data - ideal_data)
+                interp_t = interp1d(x, trad)
+                new_x = np.linspace(0.98, 0.99999, 10000)
+                new_logic = interp_l(new_x)
+                new_trad = interp_t(new_x)
+                interp_li = interp1d(x, li)
+                new_li = interp_li(new_x)
+
+
+                intersect_index = np.argmin(np.abs(new_logic - new_trad))
+                lbl = '$m=$' + str(precision)
+                axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c,label='$l_i=$' + str(
+                    round(np.real(new_li[intersect_index]) * 100, 2)) + '%', s=100)
+                axes.plot(np.NaN, np.NaN, label=lbl, color=c)
+
         else:
-            # fill between
-            logic = np.abs(logical_data - ideal_data)
-            interp_l = interp1d(x, logic)
-            trad = np.abs(trad_data - ideal_data)
-            interp_t = interp1d(x, trad)
-            new_x = np.linspace(0.98, 0.99999, 10000)
-            new_logic = interp_l(new_x)
-            new_trad = interp_t(new_x)
-            interp_li = interp1d(x, li)
-            new_li = interp_li(new_x)
+            new_x=x
+            new_logic = np.abs(logical_data - ideal_data)
+            new_trad = np.abs(trad_data - ideal_data)
 
+        axes.plot(new_x, new_trad, '-.', color=c,linewidth=3)
+        axes.plot(new_x, new_logic, '-', color=c,linewidth=3)
 
-            intersect_index = np.argmin(np.abs(new_logic - new_trad))
-            lbl = '$m=$' + str(precision)
-            axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c,label='$l_i=$' + str(
-                round(np.real(new_li[intersect_index]) * 100, 2)) + '%')
-            axes.plot(np.NaN, np.NaN, label=lbl, color=c)
-
-
-        axes.plot(new_x, new_trad, '-.', color=c)
-        axes.plot(new_x, new_logic, '-', color=c)
-
-        # if i == 0:
-        #     axes.scatter(0.999926, 0.0016, color=c)
-        # elif i == 1:
-        #     axes.scatter(0.9979292, 0.073019, color=c)
-        # elif i == 2:
-        #     axes.scatter(0.9989193, 0.04115, color=c)
-
-        # if i == 0:
-        #     axes.scatter(0.999926,0.0016,color=c)
-        # elif i == 1:
-        #     axes.scatter(0.99724, 0.07337, color=c)
-        # elif i == 2:
-        #     axes.scatter(0.99935,0.026,color=c)
     if withLI:
-        axes.set_ylabel('$\\frac{\sigma}{\sqrt{1-l_i}} - \sigma_{ideal}$', fontsize = 35)
+        axes.set_ylabel('$\\frac{\sigma}{\sqrt{1-l_i}} - \sigma_{ideal}$', fontsize = 25)
     else:
-        axes.set_ylabel('$\sigma - \sigma_{ideal}$', fontsize=13)
+        axes.set_ylabel('$\sigma - \sigma_{ideal}$', fontsize=25)
     axes.plot(np.NaN, np.NaN, '-', color='black', label='logical ancilla LPS')
     axes.plot(np.NaN, np.NaN, '-.', color='black', label='physical ancilla')
     if xstart is not None:
@@ -1584,14 +1730,14 @@ def plot_IPEA_single_fig(precisions, withLI=False, x_points='single', save=True,
     if yend is not None:
         axes.set_ylim((-0.01, yend))
     # axes.set_yscale('log')
-    # axes.legend(loc='upper right')
-    # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    set_ticks_size(axes,30,30)
+    # axes.legend(fontsize=18)
+    plt.tight_layout(rect=[0.03, 0.03, 1, 0.95])
+    set_ticks_size(axes,20,20)
     if save:
         if withLI:
-            plt.savefig('images\\IPEA_STD_withLI')
+            plt.savefig('images\\IPEA_STD_withLI'+rotation_type+noise_type)
         else:
-            plt.savefig('images\\IPEA_STD_noLI')
+            plt.savefig('images\\IPEA_STD_noLI'+rotation_type+noise_type)
     if ax_return is not None:
         return axes
     else:
@@ -1611,12 +1757,12 @@ def plot_IPEA_single_fig_infidelity(precisions, withLI=False, x_points='single',
 
     if x_points == 'single':
         x = 1 - np.array(f_worst_1q_IPEA)
-        axes.set_xlabel('1 - Fidelity(single qubit gate)', fontsize=15)
+        plt.xlabel('1 - Fidelity(single qubit gate)', fontsize=15)
         xstart = 0.0001
         xend = 0.01
-        axes.set_ylim((5e-4, 1e1))
-        axes.set_yscale('log')
-        axes.set_xscale('log')
+        plt.ylim((1e-4, 1e1))
+        plt.yscale('log')
+        plt.xscale('log')
     elif x_points == 'two':
         print("not implemented yet)")
 
@@ -1649,7 +1795,7 @@ def plot_IPEA_single_fig_infidelity(precisions, withLI=False, x_points='single',
         elif i == 2:
             axes.scatter(0.9989193, 0.04115, color=c)
 
-    axes.set_ylabel('$\\frac{\sigma}{\sqrt{1-l_i}} - \sigma_{ideal}$')
+    axes.set_ylabel('$\sqrt{N} \left( \sigma - \sigma_{ideal} \\right)$')
     axes.plot(np.NaN, np.NaN, '*', color='black', label='logical 1LPS')
     axes.plot(np.NaN, np.NaN, '+', color='black', label='traditional')
     for label in (axes.get_xticklabels()):
@@ -1663,36 +1809,20 @@ def plot_IPEA_single_fig_infidelity(precisions, withLI=False, x_points='single',
     plt.show()
 
 
-def set_ticks_size(ax, x, y, sparse_x=False,sparse_y=False):
-        # Set tick font size
-        for ind,label in enumerate(ax.get_xticklabels()):
-            label.set_fontsize(x)
-            if sparse_x:
-                if ind%2==0:
-                    label.set_visible(False)
-        # Set tick font size
-        for ind,label in enumerate(ax.get_yticklabels()):
-            label.set_fontsize(y)
-            if sparse_y:
-                if ind % 2 == 0:
-                    label.set_visible(False)
-
-
 def plot_IPEA_MEAN_single_fig(precisions, x_points='single', save=True, xstart=None,yend=None,ystart=0,xend=1,ax_return=None):
-
 
     if ax_return is not None:
         axes = ax_return
     else:
         fig, axes = plt.subplots()
-    axes.locator_params(axis='x', nbins=3)
+    axes.locator_params(axis='x', nbins=5)
     axes.locator_params(axis='y', nbins=5)
     ideal = ideal_MEANs
     traditional = traditional_MEANs
     logical = logical_MEANs
     if x_points == 'single':
         x = f_worst_1q_IPEA
-        axes.set_xlabel('Single Gate Fidelity', fontsize=35)
+        axes.set_xlabel('Single Gate Fidelity', fontsize=25)
         # xstart = 0.9975
         # xstart = 0.9965
         # xend = 1
@@ -1736,13 +1866,13 @@ def plot_IPEA_MEAN_single_fig(precisions, x_points='single', save=True, xstart=N
         new_precs = interp_precs(new_x)
         new_li = interp_li(new_x)
 
-        axes.plot(new_x, np.abs(new_trad), '-.', color=c)
-        axes.plot(new_x, np.abs(new_logic), '-', color=c)
-        axes.plot(x,np.ones_like(x)*2**(-precision),'--',color=c)
+        axes.plot(new_x, np.abs(new_trad), '-.', color=c,linewidth=3)
+        axes.plot(new_x, np.abs(new_logic), '-', color=c,linewidth=3)
+        axes.plot(x,np.ones_like(x)*2**(-precision),'--',color=c,linewidth=3)
 
         intersect_index = np.argmin(np.abs(new_logic-new_trad))
         # axes.scatter(new_x[intersect_index],new_logic[intersect_index], color=c,label='$l_i=$'+ str(round_sig(np.real(new_li[intersect_index])*100,sig=4)) + '%')
-        axes.scatter(new_x[intersect_index],new_logic[intersect_index], color=c,s=200)
+        axes.scatter(new_x[intersect_index],new_logic[intersect_index], color=c,s=100)
 
         logic_fill_temp = new_logic[new_logic<=new_trad]
         trad_fill_temp = new_trad[new_logic<=new_trad]
@@ -1757,23 +1887,23 @@ def plot_IPEA_MEAN_single_fig(precisions, x_points='single', save=True, xstart=N
         # lbl = '$2^{-m}=$' + str(2 ** (-precision))
         # axes.plot(np.NaN, np.NaN, '--', label=lbl, color=c)
 
-    axes.set_ylabel('$|\\bar{\\theta} - \\bar{\\theta}_{ideal}|$', fontsize = 35)
+    axes.set_ylabel('$|\\bar{\\theta} - \\bar{\\theta}_{ideal}|$', fontsize = 25)
     # axes.plot(np.NaN, np.NaN, '-', color='black', label='logical ancilla LPS')
     # axes.plot(np.NaN, np.NaN, '-.', color='black', label='physical ancilla')
 
-    set_ticks_size(axes,30,30)
+    set_ticks_size(axes,20,20)
     if xstart is not None:
         axes.set_xlim((xstart, None))
     if yend is not None:
         axes.set_ylim((None, yend))
         # axes.set_yscale('log')
-    # axes.set_ylim((0, 0.1))
-    # axes.set_yscale('log')
+    axes.set_ylim((1e-3, 1e-1))
+    axes.set_yscale('log')
     # axes.set_xscale('log')
     # axes.legend()
-    # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     if save:
-        plt.savefig('images\\IPEA_MEAN_linear.jpg')
+        plt.savefig('images\\IPEA_MEAN_log_new.jpg')
     if ax_return is not None:
         return axes
     else:
@@ -1785,40 +1915,33 @@ def color(precision):
 
     return colors[int(precision/9*999)]
 
-def plot_estimated_number_of_trials(precisions, x_points='single', save=True, ax_return = None):
-    if ax_return is not None:
-        axes = ax_return
-    else:
-        fig, axes = plt.subplots()
+def plot_estimated_number_of_trials(precisions, x_points='single', save=True):
+    fig, axes = plt.subplots()
     ideal = ideal_STDs
     traditional = traditional_STDs
     logical = logical_STDs
-
-    axes.locator_params(axis='x', nbins=3)
-    axes.locator_params(axis='y', nbins=5)
-
-
     if x_points == 'single':
         x = f_worst_1q_IPEA
-        axes.set_xlabel('Single Gate Fidelity', fontsize=35)
+        plt.xlabel('Worst-Case Single Gate Fidelity', fontsize=15)
         # xstart = 0.9975
         xstart = 0.999965
         xend = 1
     elif x_points == 'two':
         x = f_worst_2q_IPEA
-        axes.set_xlabel('Worst-Case Entangling Gate Fidelity', fontsize=15)
+        plt.xlabel('Worst-Case Entangling Gate Fidelity', fontsize=15)
         xstart = 0.995
         xend = 1
     else:
         x = T_list_for_IPEA
-        axes.set_xlabel('$T_{2}$  $[T_{gate}]$', fontsize=18)
-        axes.set_xscale('log')
+        plt.xlabel('$T_{2}$  $[T_{gate}]$', fontsize=18)
+        plt.xscale('log')
         xstart = 10
         xend = 2000
 
+    color = iter(cm.rainbow(np.linspace(0, 1, len(precisions))))
     for i in range(len(precisions)):
         precision = precisions[i]
-        c = color(precision)
+        c = next(color)
 
         N_l = np.real(2**(2*precision) * (np.array(logical)[precision-1,:])**2)
         N_t = np.real(2**(2*precision) * (np.array(traditional)[precision-1,:])**2)
@@ -1827,9 +1950,8 @@ def plot_estimated_number_of_trials(precisions, x_points='single', save=True, ax
         trad_difference = N_t.astype('int') - N_i.astype('int')
         axes.plot(x, logic_difference,'-', c=c)
         axes.plot(x, trad_difference,'-.', c=c)
-        j = precision-1
-        li = 1 - (logical_STDs_noLI[j, :] / logical_STDs[j, :]) ** 2
-        axes.plot(np.NaN, np.NaN, label='m=' + str(precision),color=color(precision))
+        axes.plot(np.NaN, np.NaN, label='$2^{-m}=$' + str(2 ** (-precision)) + ", $N_{ideal}=$" + str(int(np.ceil(N_i[0]))),
+                  color=c)
         # fill between
         if precision>5:
             interp_l = interp1d(x, logic_difference,kind='cubic')
@@ -1837,35 +1959,28 @@ def plot_estimated_number_of_trials(precisions, x_points='single', save=True, ax
             new_x = np.linspace(0.997, 0.9999, 10000)
             new_logic = interp_l(new_x)
             new_trad = interp_t(new_x)
-            interp_li = interp1d(x, li)
-            new_li = interp_li(new_x)
             intersect_index = np.argmin(np.abs(new_logic - new_trad))
-            # axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c, label='$m=$' + str(precision)
-            #                                         + ", $N_{ideal}=$" + str(int(np.ceil(N_i[0])))+', $l_i=$'
-            #                                         + str(round(np.real(new_li[intersect_index]) * 100, 2)) + '%')
-            axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c,s=200)
-
+            plt.scatter(new_x[intersect_index], new_logic[intersect_index], color=c)
         # axes.plot(x, N_l,'--', c=c)
         # axes.plot(x, N_t,'-.', c=c)
         # axes.plot(x, N_i,'-', c=c)
+    axes.plot(np.NaN, np.NaN, '-', color='black', label='logical ancilla LPS')
+    axes.plot(np.NaN, np.NaN, '-.', color='black', label='physical ancilla')
 
     # axes.plot(np.NaN, np.NaN, '-', color='black', label='ideal (no decoherence)')
     # axes.set_ylabel('Estimated Minimal Number of Trials', fontsize=13)
-    axes.set_ylabel('$N-N_{ideal}$', fontsize=35)
-    # axes.set_ylabel('$N/N_{physical}$', fontsize=35)
-    set_ticks_size(axes,30,30)
+    axes.set_ylabel('$N-N_{ideal}$', fontsize=13)
+    for label in (axes.get_xticklabels()):
+        label.set_fontsize(13)
     axes.set_xlim((0.995, 1))
     axes.set_ylim((1e0, 1e6))
     axes.set_yscale('log')
-    axes.text(0.9975, 10**5, '$N>2^{2m}\\frac{\sigma^2}{1-l_i}$', style='italic', fontsize=33)
-    # axes.legend(loc='upper left')
-    # plt.tight_layout(rect=[0.0, 0.03, 0.95, 0.95])
+    axes.set_title('$N>2^{2m}\\frac{\sigma^2}{1-l_i}$', fontsize = 13)
+    axes.legend()
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     if save:
         plt.savefig('images\\IPEA_minimal_trials.jpg')
-    if ax_return is not None:
-        return axes
-    else:
-        plt.show()
+    plt.show()
 
 def plot_estimated_number_of_trials_new(precisions, x_points='single', save=True, ax_return = None):
     if ax_return is not None:
@@ -1882,7 +1997,7 @@ def plot_estimated_number_of_trials_new(precisions, x_points='single', save=True
 
     if x_points == 'single':
         x = f_worst_1q_IPEA
-        axes.set_xlabel('Single Gate Fidelity', fontsize=35)
+        axes.set_xlabel('Single Gate Fidelity', fontsize=15)
         # xstart = 0.9975
         xstart = 0.999965
         xend = 1
@@ -1897,7 +2012,7 @@ def plot_estimated_number_of_trials_new(precisions, x_points='single', save=True
         axes.set_xscale('log')
         xstart = 10
         xend = 2000
-    axes.plot(x, np.ones_like(x), '--', color='black',linewidth=7)
+    axes.plot(x, np.ones_like(x), '--', color='black')
     for i in range(len(precisions)):
         precision = precisions[i]
         c = color(precision)
@@ -1905,6 +2020,7 @@ def plot_estimated_number_of_trials_new(precisions, x_points='single', save=True
         N_l = np.real(2**(2*precision) * (np.array(logical)[precision-1,:])**2)
         N_t = np.real(2**(2*precision) * (np.array(traditional)[precision-1,:])**2)
         logic_difference = 1/(N_l / N_t)
+        # logic_difference = savitzky_golay(logic_difference,1,1)
         axes.plot(x, logic_difference,'-', c=c)
         axes.plot(np.NaN, np.NaN, label='m=' + str(precision),color=color(precision))
 
@@ -1916,14 +2032,14 @@ def plot_estimated_number_of_trials_new(precisions, x_points='single', save=True
         #     axes.scatter(new_x[intersect_index], new_logic[intersect_index], color=c,s=300)
 
 
-    axes.set_ylabel('$N-N_{ideal}$', fontsize=35)
-    axes.set_ylabel('$N_{physical}/N_{logical}$', fontsize=35)
-    set_ticks_size(axes,30,30)
+    axes.set_ylabel('$N-N_{ideal}$', fontsize=15)
+    axes.set_ylabel('$N_{physical}/N_{logical}$', fontsize=15)
+    set_ticks_size(axes,15,15)
     axes.set_xlim((0.9968, 1))
-    axes.set_ylim((-0.5, 7))
+    # axes.set_ylim((-0.5, 7))
     # axes.set_yscale('log')
 
-    axes.text(0.9971, 4, '$N>2^{2m}\\frac{\sigma^2}{1-l_i}$', style='italic', fontsize=33)
+    # axes.text(0.9971, 4, '$N>2^{2m}\\frac{\sigma^2}{1-l_i}$', style='italic', fontsize=33)
     # axes.legend(loc='upper left')
     # plt.tight_layout(rect=[0.0, 0.03, 0.95, 0.95])
     if save:
@@ -1933,51 +2049,282 @@ def plot_estimated_number_of_trials_new(precisions, x_points='single', save=True
     else:
         plt.show()
 
-def permutate_list(l,indices):
-    new_l = np.ones_like(l)
-    for i,j in enumerate(indices):
-        new_l[i] = l[indices[j]]
-    return new_l
 
+def interpolate_2d_grid(X,Y,Z):
+    x = []
+    y = []
+    z = []
+    for i in range(X.shape[0]):
+        for j in range(X.shape[1]):
+            x.append(X[i, j])
+            y.append(Y[i, j])
+            z.append(Z[i, j])
+
+    x_new = np.linspace(np.min(x), np.max(x), 1000)
+    y_new = np.linspace(np.min(y), np.max(y), 1000)
+
+    Ynew, Xnew = np.meshgrid(y_new, x_new)
+
+    interp = interpolate.LinearNDInterpolator(list(zip(x, y)), z)
+    znew = interp(Xnew, Ynew)
+
+    window = 1
+    kernel = np.ones((2*window+1,2*window+1))/(2*window+1)**2
+    znew = convolve2d(znew,kernel,boundary='symm',mode='same')
+    return Xnew,Ynew,znew
+
+def plot_color(X,Y,Z,xlabel,ylabel,title):
+    fig,ax = plt.subplots()
+    norm = DivergingNorm(vmin=Z.min(), vcenter=0, vmax=Z.max())
+    # norm = colors.LogNorm(vmin=0, vmax=0.05)
+    lims = dict(cmap='RdBu')
+    plt.pcolormesh(X, Y, Z, shading='flat', norm=norm, **lims)
+    ax.set_xlabel(xlabel,fontsize=15)
+    ax.set_ylabel(ylabel,fontsize=15)
+    ax.set_title(title,fontsize=14)
+    set_ticks_size(ax, 13, 12)
+    ax.set_yscale('log')
+    ax.set_ylim(1,100)
+    plt.colorbar(label="Physical Control             Logical Control")
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    # plt.show()
+
+def plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=9,x_points='single',interpolate=True,save=False,successful_only=True):
+    _, _, l_STD_withLI, _, _, l_STD_noLI, f_worst_1q_IPEA, f_worst_2q_IPEA, T_list_for_IPEA, _, _, _, P_i_const_N, P_l_const_N, P_t_const_N\
+        = load_IPEA_new(rotation_type, noise_type, 1)
+
+    if successful_only:
+        saved_information_fraction = 1
+    else:
+        saved_information_fraction = (np.array(l_STD_noLI)[m - 1, :] / np.array(l_STD_withLI)[m - 1, :]) ** 2
+
+    if x_points == 'two':
+        fid = f_worst_2q_IPEA
+        xlabel = 'Worst-Case Entangling Gate Fidelity'
+    elif x_points == 'single':
+        fid = f_worst_1q_IPEA
+        xlabel = 'Worst-Case Single Gate Fidelity'
+
+    # prepare data
+    error_probability_difference = np.zeros((fid.shape[0],len(Ns)))
+    Ns_logical_matrix = np.zeros((fid.shape[0],len(Ns)))
+    Ns_traditional_matrix = np.zeros((fid.shape[0],len(Ns)))
+    # build X and Y and Z_l and Z_t
+    for ind,N in enumerate(Ns):
+        _, _, l_STD_withLI, _, _, l_STD_noLI, _, _, _, _, _, _, P_i_const_N, P_l_const_N, P_t_const_N = load_IPEA_new(rotation_type, noise_type, N)
+
+        data_logical = np.array(P_l_const_N)[m - 1, :]
+        data_traditional = np.array(P_t_const_N)[m - 1, :]
+        data_ideal = np.array(P_i_const_N)[m - 1, :]
+        Ns_logical = N/saved_information_fraction
+        Ns_logical_matrix[:,ind] = Ns_logical
+        Ns_traditional_matrix[:,ind] = np.ones(fid.shape[0])*N
+
+        if successful_only:
+            error_probability_difference[:,ind] = (data_logical-data_ideal)-(data_traditional-data_ideal)
+
+    if successful_only:
+        Y,X = np.meshgrid(Ns,fid)
+        Z = error_probability_difference
+        Xnew,Ynew,Znew = interpolate_2d_grid(X,Y,Z)
+    title = "$P_{success}^{logical}-P_{success}^{physical}$, $m=$"+str(m)
+    ylabel = "$N_{ps}$"
+    if interpolate:
+        plot_color(Xnew, Ynew, Znew, xlabel,ylabel,title)
+    else:
+        plot_color(X, Y, Z, xlabel, ylabel, title)
+    if save:
+        plt.savefig(f'images\\success_probability_2d_{m}')
+    plt.show()
+
+
+def plot_error_probability(precisions,N=1,save=False,x_points='single',xlims=None, ylims=None):
+    fig, axes = plt.subplots()
+    plt.locator_params(axis='x', nbins=3)
+    plt.locator_params(axis='y', nbins=6)
+    _, _, _, _, _, _, f_worst_1q_IPEA, f_worst_2q_IPEA, T_list_for_IPEA, _, _, _, P_i, P_l, P_t\
+        = load_IPEA_new(rotation_type, noise_type, N)
+    ideal = P_i
+    traditional = P_t
+    logical = P_l
+
+    if x_points == 'single':
+        x = f_worst_1q_IPEA
+        plt.xlabel('Single Gate Fidelity', fontsize=20)
+    elif x_points == 'two':
+        x = f_worst_2q_IPEA
+        plt.xlabel('Worst-Case Entangling Gate Fidelity', fontsize=15)
+    else:
+        x = T_list_for_IPEA
+        plt.xlabel('$T_{2}$  $[T_{gate}]$', fontsize=18)
+        plt.xscale('log')
+
+    print(x.shape)
+
+    color = iter(['red', 'blue', 'green'])
+    for i in range(len(precisions)):
+        _, _, _, _, _, _, _, _, _, _, _, _, P_i, P_l, P_t \
+            = load_IPEA_new(rotation_type, noise_type, N)
+        precision = precisions[i]
+        c = next(color)
+
+        j = precisions[i] - 1
+        trad_data = traditional[j, :]
+        ideal_data = ideal[j, :]
+        logical_data = logical[j, :]
+
+        # fill between
+        logic = np.abs(logical_data - ideal_data)
+        interp_l = interp1d(x, logic,kind='cubic')
+        trad = np.abs(trad_data - ideal_data)
+        interp_t = interp1d(x, trad,kind='cubic')
+        new_x = np.linspace(0.977, 0.99999, 10000)
+        new_logic = interp_l(new_x)
+        new_trad = interp_t(new_x)
+
+        # intersect_index = np.argmin(np.abs(new_logic - new_trad))
+        # plt.scatter(new_x[intersect_index], new_logic[intersect_index], color=c)
+
+        axes.plot(new_x, new_trad, '-.', color=c)
+        axes.plot(new_x, new_logic, '-', color=c)
+        axes.plot(np.NaN, np.NaN, label='$m=$' + str(precision), color=c)
+
+    axes.set_ylabel('$\Delta P_s(n='+str(N)+')$', fontsize=20)
+    axes.plot(np.NaN, np.NaN, '-', color='black', label='logical LPS')
+    axes.plot(np.NaN, np.NaN, '-.', color='black', label='physical')
+    for label in (axes.get_xticklabels()):
+        label.set_fontsize(20)
+    for label in (axes.get_yticklabels()):
+        label.set_fontsize(20)
+    # axes.set_yscale('log')
+    axes.legend(fontsize=15)
+    # plt.title('Post-Selected Trials for each Digit: '+str(N))
+    axes.set_ylim((0,1))
+    plt.tight_layout(rect=[0.05, 0.03, 0.95, 0.95])
+    if xlims is not None:
+        axes.set_xlim(xlims)
+    if ylims is not None:
+        axes.set_ylim(ylims)
+    if save:
+        plt.savefig(f'images\\probability_N_{N}.jpg')
+    plt.show()
+
+
+def plot_num_trials_each_digit(precisions,Ns=(1,3,5,7,9,11,15,21,29,39,51,65,79,99),epsilon=0.05,save=False,x_points='single',xlims=None, ylims=None):
+    fig, axes = plt.subplots()
+
+    _, _, l_STD_withLI, _, _, l_STD_noLI, f_worst_1q_IPEA, f_worst_2q_IPEA, T_list_for_IPEA, _, _, _, _, _, _\
+        = load_IPEA_new(rotation_type, noise_type, 1)
+
+    if x_points == 'single':
+        x = f_worst_1q_IPEA
+        plt.xlabel('Worst-Case Single Gate Fidelity', fontsize=15)
+    elif x_points == 'two':
+        x = f_worst_2q_IPEA
+        plt.xlabel('Worst-Case Entangling Gate Fidelity', fontsize=15)
+    else:
+        x = T_list_for_IPEA
+        plt.xlabel('$T_{2}$  $[T_{gate}]$', fontsize=18)
+        plt.xscale('log')
+
+    print(x.shape)
+
+    color = iter(['red', 'blue', 'green'])
+
+    for i in precisions:
+        saved_information_fraction = (np.array(l_STD_noLI)[i - 1, :] / np.array(l_STD_withLI)[i - 1, :]) ** 2
+
+        # build data
+        Ns_logical_tot = np.zeros((x.shape[0],len(Ns)))
+        Ns_trad_tot = np.zeros((x.shape[0],len(Ns)))
+        P_l_tot = np.zeros((x.shape[0],len(Ns)))
+        P_t_tot = np.zeros((x.shape[0],len(Ns)))
+        Fid_tot = np.zeros((x.shape[0],len(Ns)))
+        for ind,n in enumerate(Ns):
+            Ns_logical_tot[:,ind] = list(np.real(n/saved_information_fraction))
+            Ns_trad_tot[:,ind] = np.ones_like(list(np.real(saved_information_fraction)))*n
+            _, _, _, _, _, _, _, _, _, _, _, _, P_i, P_l, P_t \
+                = load_IPEA_new(rotation_type, noise_type, n)
+            P_l_tot[:,ind] = list(P_l[i-1,:])
+            P_t_tot[:,ind] = list(P_t[i-1,:])
+            Fid_tot[:,ind] = list(x)
+
+        Fnew_t, Nnew_t, Pnew_t = interpolate_2d_grid(Fid_tot, Ns_trad_tot, P_t_tot)
+        Fnew_l, Nnew_l, Pnew_l = interpolate_2d_grid(Fid_tot, Ns_logical_tot, P_l_tot)
+        Pnew_l = np.nan_to_num(Pnew_l,nan=10)
+        #
+        # Fnew_t, Nnew_t, Pnew_t = Fid_tot, Ns_trad_tot, P_t_tot
+        # Fnew_l, Nnew_l, Pnew_l = Fid_tot, Ns_logical_tot, P_l_tot
+
+        # find intersections with epsilon
+        Ns_logical_intersect = []
+        Fs_logical_intersect = []
+        Ns_trad_intersect = []
+        Fs_trad_intersect = []
+        for ind,fidelity in enumerate(Fnew_t[:,0]):
+            intersection_index_l = np.argmin(np.abs(Pnew_l[ind,:]-(1-epsilon)))
+            intersection_index_t = np.argmin(np.abs(Pnew_t[ind,:]-(1-epsilon)))
+            Fs_logical_intersect.append(Fnew_l[ind,intersection_index_l])
+            Ns_logical_intersect.append(Nnew_l[ind,intersection_index_l])
+            Fs_trad_intersect.append(Fnew_t[ind,intersection_index_t])
+            Ns_trad_intersect.append(Nnew_t[ind,intersection_index_t])
+
+        c = next(color)
+        axes.plot(Fs_logical_intersect, Ns_logical_intersect, '-', color=c)
+        axes.plot(Fs_trad_intersect, Ns_trad_intersect, '-.', color=c)
+        axes.plot(np.NaN, np.NaN, label='$m=$' + str(i), color=c)
+
+    axes.set_ylabel('Number of Trials per Digit', fontsize=13)
+    axes.plot(np.NaN, np.NaN, '-', color='black', label='logical ancilla LPS')
+    axes.plot(np.NaN, np.NaN, '-.', color='black', label='physical ancilla')
+    for label in (axes.get_xticklabels()):
+        label.set_fontsize(13)
+    axes.set_yscale('log')
+    axes.legend()
+    plt.title('$\epsilon=$'+str(epsilon))
+    # axes.set_ylim((0, 1))
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    if xlims is not None:
+        axes.set_xlim(xlims)
+    if ylims is not None:
+        axes.set_ylim(ylims)
+    if save:
+        plt.savefig(f'images\\probability_epsilon_{epsilon}.jpg')
+    plt.show()
+
+save=True
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=9,successful_only=True,interpolate=True,save=save)
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=8,successful_only=True,interpolate=True,save=save)
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=7,successful_only=True,interpolate=True,save=save)
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=6,successful_only=True,interpolate=True,save=save)
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=5,successful_only=True,interpolate=True,save=save)
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=4,successful_only=True,interpolate=True,save=save)
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=3,successful_only=True,interpolate=True,save=save)
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=2,successful_only=True,interpolate=True,save=save)
+# plot_error_probability_heatmap(Ns = (1,3,5,7,9,11,15,21,29,39,51,65,79,99),m=1,successful_only=True,interpolate=True,save=save)
+# plot_error_probability([3,6,9],N=1,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=3,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=5,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=7,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=9,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=11,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=15,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=21,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=29,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=39,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=51,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=65,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=79,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_error_probability([3,6,9],N=99,save=save,x_points='single',xlims=None,ylims=(0,1))
+# plot_num_trials_each_digit([3,5,9],Ns=(1,3,5,7,9,11,15,21,29,39,51,65,79,99),epsilon=0.05,save=False,x_points='single',xlims=None, ylims=None)
 if (plot_data_new or plot_data_from_2021):
     # plot_IPEA_single_fig([1,2,3],withLI=True,x_points='single',save=False)
     # plot_IPEA([5,6,9],withLI=True,x_points='single',save=False)
-    # plot_IPEA_infidelity([5,6,9],withLI=True,x_points='single',save=True)
-    # plot_IPEA_single_fig([5,7,9],withLI=True,x_points='single',save=False,xstart=0.997,yend=0.15)
-    # plot_IPEA_single_fig([5,7,9],withLI=False,x_points='single',save=False)
-    # plot_IPEA_MEAN_single_fig([5,7,9],x_points='single',save=False,xstart=0.98,yend=0.05,ystart=0,xend=1)
-    # plot_estimated_number_of_trials_new([3,5,6,7,8,9],x_points='single',save=False)
-    # plot_IPEA_single_fig_infidelity([5,6,9],withLI=True,x_points='single',save=True)
-
-    fig, axes = plt.subplots(1,3,figsize=(25, 7))
-
-    ax_stds = plot_IPEA_single_fig([5,7,9],withLI=True,x_points='single',save=False,xstart=0.997,yend=0.15,ax_return=axes[1])
-    ax_mean = plot_IPEA_MEAN_single_fig([5,7,9],x_points='single',save=False,xstart=0.98,yend=0.05,ystart=0,xend=1,ax_return=axes[0])
-    ax_num = plot_estimated_number_of_trials_new([2,5,6,7,8,9],x_points='single',save=False,ax_return=axes[2])
-
-    lines_labels = [ax.get_legend_handles_labels() for ax in fig.axes]
-    lines, labels = [sum(lol, []) for lol in zip(*lines_labels)]
-    for line in lines:
-        line.set_linewidth(5)
-    fig.legend(lines, labels,bbox_to_anchor=(0.95, 0.23), ncol=4,fontsize=30)
-    lines_all = [ax.get_lines() for ax in fig.axes]
-    for ax_lines in lines_all:
-        for line in ax_lines:
-            line.set_linewidth(4)
-
-    plt.tight_layout(rect=[0.03, 0.2, 1.0, 1.0])
-    ax_mean.plot(np.NaN,np.NaN,'--',color='black',label='$2^{-m}$')
-    leg = ax_mean.legend(loc='upper right',fontsize=30)
-    for line in leg.get_lines():
-        line.set_linewidth(4)
-    plt.savefig('images\\IPEA_sensing_united')
-    plt.show()
+    # plot_IPEA_infidelity([5,6,9],withLI=True,x_points='single',save=False)
+    plot_IPEA_single_fig([5,6,9],withLI=True,x_points='single',save=False,xstart=0.997,yend=0.1)
+    # plot_IPEA_single_fig([5,6,9],withLI=False,x_points='single',save=True)
+    # plot_IPEA_MEAN_single_fig([5,6,9],x_points='single',save=True,xstart=0.9825,yend=0.05,ystart=0,xend=1)
+    # plot_estimated_number_of_trials_new([2,5,6,7,8,9],x_points='single',save=False)
+    # plot_IPEA_single_fig_infidelity([5,6,9],withLI=True,x_points='single',save=False)
 
 
-if plot_histogram_STD_for_ideal_simulation:
-    U= 'Rz'
-    angles = [1/np.sqrt(2),1/np.sqrt(3),1/np.sqrt(5),1/np.sqrt(7),1/np.sqrt(11)]
-    precision = 10
-    for angle in angles:
-        plot_histogram_STD_VS_num_digits(angle,precision,'Rz','T1','data\\IPEA_test\\'+U+'\\' + str(angle),show=False,create_data=True)
-    plt.show()
